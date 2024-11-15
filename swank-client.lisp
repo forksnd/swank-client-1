@@ -228,9 +228,43 @@ with ARGS bound to the corresponding values in the CDR of VALUE."
                '()
                `((t (error "destructure-case failed: ~S" ,tmp))))))))
 
+(defun handle-rex (connection form package-name thread continuation)
+  (let ((id nil))
+    (with-lock-held ((connection-lock connection))
+      (setf id (incf (continuation-counter connection)))
+      (push (list id continuation form package-name thread) (rex-continuations connection))
+      (when (eq (state connection) :dead) (error 'slime-network-error)))
+    (let ((name (format nil "swank sender for ~A/~D" (host-name connection) (port connection))))
+      (make-thread (lambda ()
+                     ;; Catch network errors so the Swank sender thread exits gracefully if
+                     ;; there are communications problems with the remote Lisp.
+                     (handler-case
+                         (slime-send `(:emacs-rex ,form ,package-name ,thread ,id) connection)
+                       (slime-network-error ())))
+                   :name name))))
+
 (defun send-to-emacs (event)
   "Sends EVENT to Emacs."
   (swank::send (swank::mconn.control-thread (swank::default-connection)) event))
+
+(defun handle-rex-result (connection value id form-to-forward)
+  "Handles the result VALUE returned for a remote evaluation request sent to
+CONNECTION by the thread identified by ID.  If that thread is a local thread,
+the result is delivered to it.  Otherwise, the initial evaluation request was
+sent from Slime running on an Emacs client and we had forwarded the request to
+the remote Lisp, so we send FORM-TO-FORWARD back to Emacs as the evaluation
+response."
+  (let ((send-to-emacs t))
+    (with-lock-held ((connection-lock connection))
+      (let ((rec (assoc id (rex-continuations connection))))
+        (when rec
+          (setf send-to-emacs nil)
+          (setf (rex-continuations connection) (remove rec (rex-continuations connection)))
+          (funcall (second rec) value))))
+    ;; The value returned is not for us.  Forward it to Emacs/Slime.
+    (when send-to-emacs
+      (force-output)
+      (send-to-emacs form-to-forward))))
 
 ;;;; Protocol event handler (the guts)
 
@@ -246,31 +280,9 @@ with ARGS bound to the corresponding values in the CDR of VALUE."
 are communications problems."
   (destructure-case event
     ((:emacs-rex form package-name thread continuation)
-     (let ((id nil))
-       (with-lock-held ((connection-lock connection))
-         (setf id (incf (continuation-counter connection)))
-         (push (list id continuation form package-name thread) (rex-continuations connection))
-         (when (eq (state connection) :dead) (error 'slime-network-error)))
-       (let ((name (format nil "swank sender for ~A/~D" (host-name connection) (port connection))))
-         (make-thread (lambda ()
-                        ;; Catch network errors so the Swank sender thread exits gracefully if
-                        ;; there are communications problems with the remote Lisp.
-                        (handler-case
-                            (slime-send `(:emacs-rex ,form ,package-name ,thread ,id) connection)
-                          (slime-network-error ())))
-                      :name name))))
+     (handle-rex connection form package-name thread continuation))
     ((:return value id)
-     (let ((send-to-emacs t))
-       (with-lock-held ((connection-lock connection))
-         (let ((rec (assoc id (rex-continuations connection))))
-           (when rec
-             (setf send-to-emacs nil)
-             (setf (rex-continuations connection) (remove rec (rex-continuations connection)))
-             (funcall (second rec) value))))
-       ;; The value returned is not for us.  Forward it to Slime.
-       (when send-to-emacs
-         (force-output)
-         (send-to-emacs `(:return ,(swank::current-thread) ,value ,id)))))
+     (handle-rex-result connection value id `(:return ,(swank::current-thread) ,value ,id)))
 
     ;; When a remote computation signals a condition and control ends up in the debugger, Swank
     ;; sends these events back to pop up a Slime breakpoint window.  Forward the events to Slime.
@@ -325,11 +337,29 @@ are communications problems."
     ((:ping thread tag)
      (slime-send `(:emacs-pong ,thread ,tag) connection))
     ((:reader-error packet condition)
-     (print (list :reader-error packet condition))
-     (error "Invalid protocol message"))
+     ;; The server was unable to read the form sent by the client.
+     (let ((form
+             (with-standard-io-syntax
+               (let ((*package* *io-package*))
+                 (ignore-errors (read-from-string packet))))))
+       (unless (eq (first form) :emacs-rex)
+         ;; The client cannot read the form or it is not an evaluation request.
+         (print (list :reader-error packet condition))
+         (error "Invalid protocol message"))
+       (let ((id (fifth form))
+             (abort `(:abort ,condition)))
+         ;; The original message was a remote evaluation request but the server could not read the
+         ;; form.  Return an abort value.
+         (handle-rex-result connection
+                            abort
+                            id
+                            `(:return ,(swank::current-thread) ,abort ,id)))))
     ((:invalid-rpc id message)
-     (setf (rex-continuations connection) (remove id (rex-continuations connection) :key #'car))
-     (error "Invalid rpc: ~S" message))
+     ;; The thread specified in an :emacs-rex request does not exist in the remote Lisp.
+     (handle-rex-result connection
+                        `(:abort ,message)
+                        id
+                        `(:invalid-rpc ,(swank::current-thread) ,id ,message)))
     ((:emacs-skipped-packet packet)
      (print (list :emacs-skipped-packet packet)))
     (t
