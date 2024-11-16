@@ -76,14 +76,15 @@ match each returned value with the continuation it should be passed to.")
           :type (member :alive :closing :dead)
           :documentation "State of the connection, either :ALIVE, :CLOSING, or :DEAD.")
    (connection-lock :reader connection-lock
-                    :initform (make-lock)
+                    :initform (make-lock :name "connection")
                     :documentation
 "Lock protecting slots of this connection that are read and written by
 concurrently running threads."))
   (:documentation "A connection to a Swank server."))
 
 (defvar *open-connections* '() "List of all open Swank connections.")
-(defvar *connections-lock* (make-lock) "Lock protecting *OPEN-CONNECTIONS*.")
+(defvar *connections-lock* (make-lock :name "open connections")
+  "Lock protecting *OPEN-CONNECTIONS*.")
 
 (defun add-open-connection (connection)
   "Adds CONNECTION to the set of open Swank connections."
@@ -406,7 +407,7 @@ network problems sending SEXP."
   "Sends SEXP over CONNECTION to a Swank server for evaluation and waits for the
 result.  When the result is received, it is returned.  Signals
 SLIME-NETWORK-ERROR when there are network problems sending SEXP."
-  (let* ((done-lock (make-lock "slime eval"))
+  (let* ((done-lock (make-lock :name "slime eval"))
          (done (make-condition-variable))
          (result-available nil)
          (result nil))

@@ -29,7 +29,7 @@
                 #:octet
                 #:string-to-utf8-octets
                 #:utf8-octets-to-string)
-  (:import-from #:bordeaux-threads
+  (:import-from #:bt2                   ; bordeaux-threads API version 2
                 #:condition-notify
                 #:condition-wait
                 #:make-condition-variable
