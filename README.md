@@ -4,12 +4,14 @@ Swank Client is a Common Lisp implementation of the client side of the Swank
 debugging protocol used by [Slime](https://en.wikipedia.org/wiki/SLIME), a [GNU
 Emacs](https://www.gnu.org/software/emacs) mode that implements an IDE for Lisp
 programming.  Emacs uses the Swank protocol to communicate with a Lisp system
-when a user runs the IDE, but the protocol is useful independently of Emacs
+when a user runs Slime, but the protocol is useful independently of Emacs
 because it allows a client to evaluate expressions on a remote Lisp that's
 running a Swank server.
 
 Swank Client is used by [Swank Crew](https://github.com/brown/swank-crew) to
-implement a Slime IDE for developing distributed algorithms in Lisp.
+implement an Emacs/Slime IDE for developing distributed algorithms in Lisp.
+
+Swank Client has been tested with CLISP, CCL, ECL, and SBCL.
 
 ## The Swank Client API
 
@@ -81,7 +83,7 @@ and the example code in
 The code below starts two Swank servers, one listening on port 4005 and the
 other listening on port 10000.
 
-```
+```common-lisp
 (load-quicklisp)
 (asdf:load-system 'com.google.base)
 (asdf:load-system 'swank)
@@ -105,8 +107,8 @@ other listening on port 10000.
   (setf swank:*configure-emacs-indentation* nil
         swank::*enable-event-history* nil
         swank:*log-events* t)
-  (swank:create-server :port *emacs-port* :dont-close t)
-  (swank:create-server :port *swank-client-port* :dont-close t)
+  (swank:create-server :port *emacs-port* :dont-close t :style :spawn)
+  (swank:create-server :port *swank-client-port* :dont-close t :style :spawn)
   (wait-for-swank-thread))
 
 (main)
@@ -120,7 +122,7 @@ normal Slime IDE session.  From the Slime IDE you can evaluate the following
 code, which creates a Swank Client connection to the server running on port
 10000 and remotely evaluates the expression ```(cons 1 2)```.
 
-```
+```common-lisp
 (load-quicklisp)
 (asdf:load-system 'swank-client)
 

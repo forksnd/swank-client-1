@@ -41,6 +41,7 @@
                 #:socket-close
                 #:socket-connect
                 #:socket-error
+                #:socket-option
                 #:socket-stream
                 #:stream-usocket)
   (:export #:swank-connection

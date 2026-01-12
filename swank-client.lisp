@@ -174,20 +174,15 @@ doesn't exist; otherwise, returns the first line of the file."
     (with-open-file (input secret-file :if-does-not-exist nil)
       (when input (read-line input nil "")))))
 
-(defun socket-keep-alive (socket)
-  "Configures TCP keep alive packets for SOCKET.  The socket connection will be
+(defun socket-keep-alive (usocket)
+  "Configures TCP keep alive packets for USOCKET.  The socket connection will be
 considered dead if keep alive packets are lost."
-  (declare (ignorable socket))
-  #+allegro
-  (socket:set-socket-options socket :keepalive t)
-  #+ccl
-  (ccl::set-socket-options socket :keepalive t)
-  #+sbcl
-  (setf (sb-bsd-sockets:sockopt-keep-alive socket) t)
+  (setf (socket-option usocket :tcp-keepalive) t)
   #+(and linux sbcl)
-  (setf (sb-bsd-sockets:sockopt-tcp-keepcnt socket) 1
-        (sb-bsd-sockets:sockopt-tcp-keepidle socket) 30
-        (sb-bsd-sockets:sockopt-tcp-keepintvl socket) 30))
+  (let ((socket (socket usocket)))
+    (setf (sb-bsd-sockets:sockopt-tcp-keepcnt socket) 1
+          (sb-bsd-sockets:sockopt-tcp-keepidle socket) 30
+          (sb-bsd-sockets:sockopt-tcp-keepintvl socket) 30)))
 
 (defun slime-net-connect (host-name port)
   "Establishes a connection to the Swank server listening on PORT of HOST-NAME.
@@ -198,7 +193,7 @@ Swank server."
   (let ((usocket (handler-case (socket-connect host-name port :element-type 'octet)
                    (socket-error ()
                      (return-from slime-net-connect nil)))))
-    (socket-keep-alive (socket usocket))
+    (socket-keep-alive usocket)
     (let ((connection
             (make-instance 'swank-connection :host-name host-name :port port :usocket usocket))
           (secret (slime-secret)))

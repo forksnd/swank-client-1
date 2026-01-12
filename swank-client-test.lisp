@@ -24,7 +24,6 @@
 (defpackage #:swank-client-test
   (:documentation "Test code in the SWANK-CLIENT package.")
   (:use #:common-lisp
-        #:com.google.base
         #:hu.dwim.stefil
         #:swank-client)
   (:export #:test-swank-client))
@@ -36,11 +35,15 @@
 
 (in-suite test-swank-client)
 
-(defconst +server-count+ 4)
+(defconstant +server-count+ 4)
 
 (defun create-swank-server ()
+  "Creates a new Swank server thread and return the port number on which it is
+listening."
   (setf swank:*configure-emacs-indentation* nil)
-  (swank:create-server :port 0))
+  ;; Ensure that a new thread is started.
+  (setf swank::*main-thread-used* t)
+  (swank:create-server :port 0 :dont-close nil :style :spawn))
 
 (deftest no-connection ()
   (signals swank-client:slime-network-error
